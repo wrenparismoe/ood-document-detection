@@ -10,11 +10,13 @@ from datasets import load_metric
 from model import LayoutLMForSequenceClassification
 from evaluation import evaluate_ood
 import wandb
+wandb.init(project="ood", )
 import warnings
 from data import load
 from sklearn.metrics import accuracy_score
 warnings.filterwarnings("ignore")
 
+# 2419435459658b249d1a54abb6760d498b974b47
 
 task_to_labels = {
     'rvl_cdip': 16,

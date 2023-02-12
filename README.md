@@ -19,7 +19,7 @@ Code for CSE547 Project, 2023
 Run the model with the following commands: 
 
 ```bash
->> python run.py --task_name "rvl-cdip" --loss "margin"
+>> python run.py --task_name "rvl_cdip" --loss "margin"
 ```
 
 The loss can take "margin" or "self", which means using margin-based or self-supervised contrastive loss respectively.

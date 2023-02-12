@@ -147,9 +147,10 @@ def load_id():
     # val_temp = Dataset.from_pandas(val_df.iloc[0:20])
     # test_temp = Dataset.from_pandas(test_df.iloc[0:20])
 
-    updated_train = train_df.map(parse_json)
-    updated_val = val_df.map(parse_json)
-    updated_test = test_df.map(parse_json)
+
+    updated_train = Dataset.from_pandas(train_df[0:100000]).map(parse_json)
+    updated_val = Dataset.from_pandas(val_df).map(parse_json)
+    updated_test = Dataset.from_pandas(test_df).map(parse_json)
 
     datasets = {'train': updated_train, 'validation': updated_val, 'test': updated_test}
     return datasets
