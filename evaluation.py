@@ -1,6 +1,7 @@
 import torch
 import numpy as np
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, DistributedSampler
+from torch import autocast
 from sklearn.metrics import roc_auc_score
 
 
@@ -13,28 +14,35 @@ def merge_keys(l, keys):
     return new_dict
 
 
-def evaluate_ood(args, model, features, ood, tag):
+def evaluate_ood(args, model, feature_dataset, ood_dataset, ood_sampler, tag):
     keys = ['softmax', 'maha', 'cosine', 'energy']
 
-    dataloader = DataLoader(features, batch_size=args.batch_size)
+    # If issues initialize dataloader in main training loop
+    feature_sampler = DistributedSampler(feature_dataset, num_replicas=args.n_gpu, rank=args.rank, shuffle=False, seed=66)
+
+    feature_dataloader = DataLoader(feature_dataset, batch_size=args.batch_size, shuffle=False, sampler=feature_sampler, pin_memory=True, num_workers=8)
     in_scores = []
-    for batch in dataloader:
+    # tqdm?
+    for batch in feature_dataloader:
         model.eval()
-        batch = {key: value.to(args.device) for key, value in batch.items()}
+        batch = {key: value.to(args.rank) for key, value in batch.items()}
         with torch.no_grad():
             ood_keys = model.compute_ood(**batch)
             in_scores.append(ood_keys)
     in_scores = merge_keys(in_scores, keys)
+    del feature_dataloader
 
-    dataloader = DataLoader(ood, batch_size=args.batch_size)
+    ood_dataloader = DataLoader(ood_dataset, batch_size=args.batch_size, shuffle=False, sampler=ood_sampler, pin_memory=True, num_workers=8)
     out_scores = []
-    for batch in dataloader:
+    # tqdm?
+    for batch in ood_dataloader:
         model.eval()
-        batch = {key: value.to(args.device) for key, value in batch.items()}
+        batch = {key: value.to(args.rank) for key, value in batch.items()}
         with torch.no_grad():
             ood_keys = model.compute_ood(**batch)
             out_scores.append(ood_keys)
     out_scores = merge_keys(out_scores, keys)
+    del ood_dataloader
 
     outputs = {}
     for key in keys:
@@ -49,6 +57,8 @@ def evaluate_ood(args, model, features, ood, tag):
 
         outputs[tag + "_" + key + "_auroc"] = auroc
         outputs[tag + "_" + key + "_fpr95"] = fpr_95
+    
+    #torch.cuda.empty_cache()
     return outputs
 
 

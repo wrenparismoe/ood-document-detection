@@ -148,9 +148,9 @@ def load_id():
     # test_temp = Dataset.from_pandas(test_df.iloc[0:20])
 
 
-    updated_train = Dataset.from_pandas(train_df[0:100000]).map(parse_json)
-    updated_val = Dataset.from_pandas(val_df).map(parse_json)
-    updated_test = Dataset.from_pandas(test_df).map(parse_json)
+    updated_train = Dataset.from_pandas(train_df[0:12000]).map(parse_json)
+    updated_val = Dataset.from_pandas(val_df[0:4000]).map(parse_json)
+    updated_test = Dataset.from_pandas(test_df[0:4000]).map(parse_json)
 
     datasets = {'train': updated_train, 'validation': updated_val, 'test': updated_test}
     return datasets
@@ -158,7 +158,7 @@ def load_id():
 
 def load_ood():
     ood_df = pd.read_csv("data/processed_ood.csv")
-    ood_df = Dataset.from_pandas(ood_df)
+    ood_df = Dataset.from_pandas(ood_df[0:2000])
     updated_ood = ood_df.map(parse_json)
     datasets = {'test': updated_ood}
     return datasets

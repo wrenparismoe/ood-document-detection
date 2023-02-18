@@ -2,15 +2,17 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
+#from torch import autocast
 from torch.nn import CrossEntropyLoss
 from transformers import LayoutLMPreTrainedModel, LayoutLMModel
-from sklearn.covariance import EmpiricalCovariance
+# from sklearn.covariance import EmpiricalCovariance
 
 
 class LayoutLMForSequenceClassification(LayoutLMPreTrainedModel):
     def __init__(self, config):
         super().__init__(config)
         self.num_labels = config.num_labels
+        # self.device = self.rank
         self.layoutlm = LayoutLMModel(config)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
         self.classifier = nn.Linear(config.hidden_size, config.num_labels)
@@ -26,6 +28,7 @@ class LayoutLMForSequenceClassification(LayoutLMPreTrainedModel):
         label=None,
 
     ):
+
         outputs = self.layoutlm(
             input_ids=input_ids,
             bbox=bbox,
@@ -109,14 +112,14 @@ class LayoutLMForSequenceClassification(LayoutLMPreTrainedModel):
         }
         return ood_keys
 
-    def prepare_ood(self, dataloader=None):
+    def prepare_ood(self, dataloader=None, rank=0):
         self.bank = None
         self.label_bank = None
-        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        # device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         for batch in dataloader:
             self.eval()
 
-            batch = {key: value.to(device) for key, value in batch.items()}
+            batch = {key: value for key, value in batch.items()}
             label = batch['label']
             outputs = self.layoutlm(
                 input_ids=batch['input_ids'],
@@ -127,23 +130,31 @@ class LayoutLMForSequenceClassification(LayoutLMPreTrainedModel):
 
             pooled = outputs[1]
             if self.bank is None:
-                self.bank = pooled.clone().detach()
-                self.label_bank = label.clone().detach()
+                self.bank = pooled.detach() # .clone()
+                self.label_bank = label.detach() # .clone()
             else:
-                bank = pooled.clone().detach()
-                label_bank = label.clone().detach()
+                bank = pooled.detach() # .clone()
+                label_bank = label.detach() # .clone()
                 self.bank = torch.cat([bank, self.bank], dim=0)
                 self.label_bank = torch.cat([label_bank, self.label_bank], dim=0)
 
         self.norm_bank = F.normalize(self.bank, dim=-1)
         N, d = self.bank.size()
-        self.all_classes = list(set(self.label_bank.tolist()))
-        self.class_mean = torch.zeros(max(self.all_classes) + 1, d).to(device)
+        # self.all_classes = list(set(self.label_bank.tolist()))
+        self.all_classes = self.label_bank.unique()
+        self.class_mean = torch.zeros(self.all_classes.max() + 1, d, device=f'cuda:{rank}') # max(self.all_classes)
         for c in self.all_classes:
             self.class_mean[c] = (self.bank[self.label_bank == c].mean(0))
-        centered_bank = (self.bank - self.class_mean[self.label_bank]).detach().cpu().numpy()
-        precision = EmpiricalCovariance().fit(centered_bank).precision_.astype(np.float32)
-        self.class_var = torch.from_numpy(precision).float().to(device)
+
+
+        # centered_bank = (self.bank - self.class_mean[self.label_bank]).detach().cpu().numpy()
+        # precision = EmpiricalCovariance().fit(centered_bank).precision_.astype(np.float32)
+        # self.class_var = torch.from_numpy(precision).float().to(device)
+
+        # Get the centered data for the bank
+        centered_bank = (self.bank - self.class_mean[self.label_bank])
+        # Compute the covariance matrix, and extract the precision (psuedo inverse)
+        self.class_var = torch.linalg.pinv(torch.cov(centered_bank, correction=0), hermitian=True)
 
 
 
