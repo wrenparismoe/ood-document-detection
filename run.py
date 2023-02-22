@@ -133,7 +133,7 @@ def main():
     model = LayoutLMForSequenceClassification.from_pretrained(
         args.model_name_or_path, config=config,
     )
-    model.to(device)
+    model.to(0)
 
     datasets = ['rvl_cdip', 'ood']
     benchmarks = ()
