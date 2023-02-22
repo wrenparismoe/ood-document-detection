@@ -112,11 +112,11 @@ class LayoutLMForSequenceClassification(LayoutLMPreTrainedModel):
     def prepare_ood(self, dataloader=None):
         self.bank = None
         self.label_bank = None
-        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        # device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         for batch in dataloader:
             self.eval()
 
-            batch = {key: value.to(device) for key, value in batch.items()}
+            batch = {key: value.cuda() for key, value in batch.items()}
             label = batch['label']
             outputs = self.layoutlm(
                 input_ids=batch['input_ids'],
@@ -138,12 +138,12 @@ class LayoutLMForSequenceClassification(LayoutLMPreTrainedModel):
         self.norm_bank = F.normalize(self.bank, dim=-1)
         N, d = self.bank.size()
         self.all_classes = list(set(self.label_bank.tolist()))
-        self.class_mean = torch.zeros(max(self.all_classes) + 1, d).to(device)
+        self.class_mean = torch.zeros(max(self.all_classes) + 1, d).cuda()
         for c in self.all_classes:
             self.class_mean[c] = (self.bank[self.label_bank == c].mean(0))
         centered_bank = (self.bank - self.class_mean[self.label_bank]).detach().cpu().numpy()
         precision = EmpiricalCovariance().fit(centered_bank).precision_.astype(np.float32)
-        self.class_var = torch.from_numpy(precision).float().to(device)
+        self.class_var = torch.from_numpy(precision).float().cuda()
 
 
 
