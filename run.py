@@ -174,6 +174,7 @@ def main():
     datasets = ['rvl_cdip', 'ood']
     benchmarks = ()
 
+    # TODO: Implement save/load datasets from disk using datasets.save_to_disk() and datasets.load_dataset()
     if args.create_pickles:
         for dataset in datasets:
             if dataset == args.task_name:
@@ -197,7 +198,6 @@ def main():
             else:
                 _, _, ood_dataset = load(dataset, tokenizer, max_seq_length=args.max_seq_length)
                 benchmarks = (('rvl_cdip_ood', ood_dataset),) + benchmarks
-                #benchmarks=None
 
         train(args, model, train_dataset, dev_dataset, test_dataset, benchmarks)
 

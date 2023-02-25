@@ -145,10 +145,10 @@ def load_id():
     test_df = pd.read_csv("/tmp/wpm/data/processed_test.csv")
     
     # Datasets map arguments: keep_in_memory=bool, num_proc=int
-
-    updated_train = Dataset.from_pandas(train_df[0:20000]).map(parse_json, keep_in_memory=True, num_proc=8)
-    updated_val = Dataset.from_pandas(val_df[0:4000]).map(parse_json, keep_in_memory=True, num_proc=4)
-    updated_test = Dataset.from_pandas(test_df[0:4000]).map(parse_json, keep_in_memory=True, num_proc=4)
+    
+    updated_train = Dataset.from_pandas(train_df).map(parse_json, keep_in_memory=True, num_proc=8)
+    updated_val = Dataset.from_pandas(val_df).map(parse_json, keep_in_memory=True, num_proc=4)
+    updated_test = Dataset.from_pandas(test_df).map(parse_json, keep_in_memory=True, num_proc=4)
 
     datasets = {'train': updated_train, 'validation': updated_val, 'test': updated_test}
     #datasets = {'train': updated_train}
@@ -157,7 +157,7 @@ def load_id():
 
 def load_ood():
     ood_df = pd.read_csv("/tmp/wpm/data/processed_ood.csv")
-    ood_df = Dataset.from_pandas(ood_df[0:1024])
+    ood_df = Dataset.from_pandas(ood_df)
     updated_ood = ood_df.map(parse_json, keep_in_memory=True, num_proc=4)
     datasets = {'test': updated_ood}
     return datasets

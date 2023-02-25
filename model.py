@@ -146,6 +146,7 @@ class LayoutLMForSequenceClassification(LayoutLMPreTrainedModel):
         for c in self.all_classes:
             self.class_mean[c] = (self.bank[self.label_bank == c].mean(0))
         centered_bank = (self.bank - self.class_mean[self.label_bank]) # DIFF
+        #Fixed incorrect matrix mult dims in compute_ood() by transposing centered_bank before calculating cov
         self.class_var = torch.linalg.pinv(torch.cov(centered_bank.T, correction=0), hermitian=True) # DIFF
 
 
