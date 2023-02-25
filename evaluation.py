@@ -2,7 +2,7 @@ import torch
 import numpy as np
 from torch.utils.data import DataLoader
 from sklearn.metrics import roc_auc_score
-
+import gc
 
 def merge_keys(l, keys):
     new_dict = {}
@@ -13,28 +13,41 @@ def merge_keys(l, keys):
     return new_dict
 
 
-def evaluate_ood(args, model, features, ood, tag):
+def evaluate_ood(args, model, features, ood, tag, rank=3):
     keys = ['softmax', 'maha', 'cosine', 'energy']
+    
+    device = torch.device(f"cuda:{rank}")
+    torch.cuda.set_device(device)
+    model.cuda(device)
 
-    dataloader = DataLoader(features, batch_size=args.batch_size)
+    dataloader = DataLoader(features, batch_size=args.batch_size, pin_memory=True, num_workers=4)
     in_scores = []
+    print("Begginning evaluate_ood()")
+    print("forward pass test_dataset")
     for batch in dataloader:
         model.eval()
-        batch = {key: value.to(args.device) for key, value in batch.items()}
+        batch = {key: value.cuda(device) for key, value in batch.items()}
         with torch.no_grad():
             ood_keys = model.compute_ood(**batch)
             in_scores.append(ood_keys)
+        del batch, ood_keys
     in_scores = merge_keys(in_scores, keys)
+    del dataloader
 
-    dataloader = DataLoader(ood, batch_size=args.batch_size)
+    dataloader = DataLoader(ood, batch_size=args.batch_size, pin_memory=True, num_workers=4)
     out_scores = []
+    print("forward pass ood_dataset")
     for batch in dataloader:
         model.eval()
-        batch = {key: value.to(args.device) for key, value in batch.items()}
+        batch = {key: value.cuda(device) for key, value in batch.items()}
         with torch.no_grad():
             ood_keys = model.compute_ood(**batch)
             out_scores.append(ood_keys)
+        del batch, ood_keys
     out_scores = merge_keys(out_scores, keys)
+    del dataloader
+    gc.collect()
+    torch.cuda.empty_cache()
 
     outputs = {}
     for key in keys:

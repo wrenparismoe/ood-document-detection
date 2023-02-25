@@ -5,7 +5,7 @@ import numpy as np
 from torch.nn import CrossEntropyLoss
 from transformers import LayoutLMPreTrainedModel, LayoutLMModel
 from sklearn.covariance import EmpiricalCovariance
-
+import gc
 
 class LayoutLMForSequenceClassification(LayoutLMPreTrainedModel):
     def __init__(self, config):
@@ -83,8 +83,10 @@ class LayoutLMForSequenceClassification(LayoutLMPreTrainedModel):
         pooled_output = self.dropout(pooled_output)
         logits = self.classifier(pooled_output)
 
-        ood_keys = None
+        ood_keys = {}
         softmax_score = F.softmax(logits, dim=-1).max(-1)[0]
+        ood_keys['softmax'] = softmax_score.tolist()
+        del softmax_score, pooled_output
 
         maha_score = []
         for c in self.all_classes:
@@ -94,29 +96,31 @@ class LayoutLMForSequenceClassification(LayoutLMPreTrainedModel):
         maha_score = torch.stack(maha_score, dim=-1)
         maha_score = maha_score.min(-1)[0]
         maha_score = -maha_score
+        ood_keys['maha'] = maha_score.tolist()
+        del maha_score
 
         norm_pooled = F.normalize(pooled, dim=-1)
         cosine_score = norm_pooled @ self.norm_bank.t()
         cosine_score = cosine_score.max(-1)[0]
+        ood_keys['cosine'] = cosine_score.tolist()
+        del cosine_score, norm_pooled
 
         energy_score = torch.logsumexp(logits, dim=-1)
+        ood_keys['energy'] = energy_score.tolist()
+        del energy_score
+        gc.collect()
+        torch.cuda.empty_cache()
 
-        ood_keys = {
-            'softmax': softmax_score.tolist(),
-            'maha': maha_score.tolist(),
-            'cosine': cosine_score.tolist(),
-            'energy': energy_score.tolist(),
-        }
         return ood_keys
 
-    def prepare_ood(self, dataloader=None):
+    def prepare_ood(self, dataloader=None, rank=3):
         self.bank = None
         self.label_bank = None
-        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        device = torch.device(f"cuda:{rank}")
+        torch.cuda.set_device(device)
         for batch in dataloader:
             self.eval()
-
-            batch = {key: value.to(device) for key, value in batch.items()}
+            batch = {key: value.cuda() for key, value in batch.items()}
             label = batch['label']
             outputs = self.layoutlm(
                 input_ids=batch['input_ids'],
@@ -124,27 +128,25 @@ class LayoutLMForSequenceClassification(LayoutLMPreTrainedModel):
                 attention_mask=batch['attention_mask'],
                 token_type_ids=batch['token_type_ids'],
             )
-
             pooled = outputs[1]
             if self.bank is None:
-                self.bank = pooled.clone().detach()
-                self.label_bank = label.clone().detach()
+                self.bank = pooled.detach() # DIFF: removed .clone()
+                self.label_bank = label.detach() # DIFF: removed .clone()
             else:
-                bank = pooled.clone().detach()
-                label_bank = label.clone().detach()
+                bank = pooled.detach() # DIFF: removed .clone()
+                label_bank = label.detach() # DIFF: removed .clone()
                 self.bank = torch.cat([bank, self.bank], dim=0)
                 self.label_bank = torch.cat([label_bank, self.label_bank], dim=0)
-
+        
         self.norm_bank = F.normalize(self.bank, dim=-1)
         N, d = self.bank.size()
-        self.all_classes = list(set(self.label_bank.tolist()))
-        self.class_mean = torch.zeros(max(self.all_classes) + 1, d).to(device)
+        # converted mean/cov calculations to torch to keep on GPU/avoid multiple copies
+        self.all_classes = self.label_bank.unique() # DIFF
+        self.class_mean = torch.zeros(self.all_classes.max() + 1, d, dtype=torch.float32, device=device) # DIFF
         for c in self.all_classes:
             self.class_mean[c] = (self.bank[self.label_bank == c].mean(0))
-        centered_bank = (self.bank - self.class_mean[self.label_bank]).detach().cpu().numpy()
-        precision = EmpiricalCovariance().fit(centered_bank).precision_.astype(np.float32)
-        self.class_var = torch.from_numpy(precision).float().to(device)
-
+        centered_bank = (self.bank - self.class_mean[self.label_bank]) # DIFF
+        self.class_var = torch.linalg.pinv(torch.cov(centered_bank.T, correction=0), hermitian=True) # DIFF
 
 
 

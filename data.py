@@ -108,22 +108,22 @@ def load(task_name, tokenizer, max_seq_length=512, is_id=False):
     })
 
     if 'train' in datasets and is_id:
-        train_dataset = datasets['train'].map(lambda example: encode_example(example), features=features)
+        train_dataset = datasets['train'].map(lambda example: encode_example(example), features=features, keep_in_memory=True, num_proc=16)
         train_dataset.set_format(type="torch",
                                  columns=['input_ids', 'bbox', 'attention_mask', 'token_type_ids', 'label'])
     else:
         train_dataset = None
     if 'validation' in datasets and is_id:
-        dev_dataset = datasets['validation'].map(lambda example: encode_example(example), features=features)
+        dev_dataset = datasets['validation'].map(lambda example: encode_example(example), features=features, keep_in_memory=True, num_proc=4)
         dev_dataset.set_format(type="torch", columns=['input_ids', 'bbox', 'attention_mask', 'token_type_ids', 'label'])
     else:
         dev_dataset = None
     if 'test' in datasets and is_id:
-        test_dataset = datasets['test'].map(lambda example: encode_example(example), features=features)
+        test_dataset = datasets['test'].map(lambda example: encode_example(example), features=features, keep_in_memory=True, num_proc=4)
         test_dataset.set_format(type="torch",
                                 columns=['input_ids', 'bbox', 'attention_mask', 'token_type_ids', 'label'])
     elif 'test' in datasets and not is_id:
-        test_dataset = datasets['test'].map(lambda example: encode_ood_example(example), features=ood_features)
+        test_dataset = datasets['test'].map(lambda example: encode_ood_example(example), features=ood_features, keep_in_memory=True, num_proc=4)
         test_dataset.set_format(type="torch",
                                 columns=['input_ids', 'bbox', 'attention_mask', 'token_type_ids', 'label'])
     else:
@@ -140,25 +140,24 @@ def parse_json(example):
 
 
 def load_id():
-    train_df = pd.read_csv("data/processed_train.csv")
-    val_df = pd.read_csv("data/processed_val.csv")
-    test_df = pd.read_csv("data/processed_test.csv")
-    # train_temp = Dataset.from_pandas(train_df.iloc[0:50])
-    # val_temp = Dataset.from_pandas(val_df.iloc[0:20])
-    # test_temp = Dataset.from_pandas(test_df.iloc[0:20])
+    train_df = pd.read_csv("/tmp/wpm/data/processed_train.csv")
+    val_df = pd.read_csv("/tmp/wpm/data/processed_val.csv")
+    test_df = pd.read_csv("/tmp/wpm/data/processed_test.csv")
+    
+    # Datasets map arguments: keep_in_memory=bool, num_proc=int
 
-
-    updated_train = Dataset.from_pandas(train_df[0:100000]).map(parse_json)
-    updated_val = Dataset.from_pandas(val_df).map(parse_json)
-    updated_test = Dataset.from_pandas(test_df).map(parse_json)
+    updated_train = Dataset.from_pandas(train_df[0:20000]).map(parse_json, keep_in_memory=True, num_proc=8)
+    updated_val = Dataset.from_pandas(val_df[0:4000]).map(parse_json, keep_in_memory=True, num_proc=4)
+    updated_test = Dataset.from_pandas(test_df[0:4000]).map(parse_json, keep_in_memory=True, num_proc=4)
 
     datasets = {'train': updated_train, 'validation': updated_val, 'test': updated_test}
+    #datasets = {'train': updated_train}
     return datasets
 
 
 def load_ood():
-    ood_df = pd.read_csv("data/processed_ood.csv")
-    ood_df = Dataset.from_pandas(ood_df)
-    updated_ood = ood_df.map(parse_json)
+    ood_df = pd.read_csv("/tmp/wpm/data/processed_ood.csv")
+    ood_df = Dataset.from_pandas(ood_df[0:1024])
+    updated_ood = ood_df.map(parse_json, keep_in_memory=True, num_proc=4)
     datasets = {'test': updated_ood}
     return datasets
