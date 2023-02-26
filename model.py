@@ -1,10 +1,11 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
+# import numpy as np
 from torch.nn import CrossEntropyLoss
 from transformers import LayoutLMPreTrainedModel, LayoutLMModel
-from sklearn.covariance import EmpiricalCovariance
+# from sklearn.covariance import EmpiricalCovariance
+from tqdm import tqdm
 import gc
 
 class LayoutLMForSequenceClassification(LayoutLMPreTrainedModel):
@@ -118,7 +119,7 @@ class LayoutLMForSequenceClassification(LayoutLMPreTrainedModel):
         self.label_bank = None
         device = torch.device(f"cuda:{rank}")
         torch.cuda.set_device(device)
-        for batch in dataloader:
+        for batch in tqdm(dataloader, desc="Preparing OOD", postfix={'dataset': 'dev'}, mininterval=2):
             self.eval()
             batch = {key: value.cuda() for key, value in batch.items()}
             label = batch['label']

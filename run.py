@@ -50,14 +50,13 @@ def train(args, model, train_dataset, dev_dataset, test_dataset, benchmarks):
         device = torch.device(f"cuda:{rank}")
         torch.cuda.set_device(device)
         model.cuda(device)
+
         model.prepare_ood(dev_dataloader, rank=rank)
         for tag, ood_features in benchmarks:
             results = evaluate_ood(args, model, test_dataset, ood_features, tag=tag, rank=rank)
             wandb.log(results, step=num_steps)
 
     #wandb.watch(model)
-
-    print("Begginning training loop")
     num_steps = 0
     for epoch in range(int(args.num_train_epochs)):
         device = torch.device("cuda:0")
@@ -66,7 +65,7 @@ def train(args, model, train_dataset, dev_dataset, test_dataset, benchmarks):
         model.zero_grad()
         #for param in model.parameters():
         #    param.grad = None
-        for step, batch in enumerate(tqdm(train_dataloader, desc=f"Train (epoch {epoch})", postfix={'dataset': 'train'})):
+        for step, batch in enumerate(tqdm(train_dataloader, desc=f"Train (epoch {epoch})", postfix={'dataset': 'train'}, mininterval=2)):
             model.train()
             with autocast(device_type='cuda', dtype=torch.float16):
                 batch = {key: value.cuda(device) for key, value in batch.items()}
@@ -110,7 +109,7 @@ def evaluate(args, model, eval_dataset, epoch, tag="train", rank=0):
     dataloader = DataLoader(eval_dataset, batch_size=args.batch_size, drop_last=True, pin_memory=True, num_workers=4)
     
     label_list, logit_list = [], []
-    for step, batch in enumerate(tqdm(dataloader, desc=f"Evaluate (epoch {epoch})", postfix={'dataset': tag})):
+    for step, batch in enumerate(tqdm(dataloader, desc=f"Evaluate (epoch {epoch})", postfix={'dataset': tag}, mininterval=2)):
         model.eval()
         with autocast(device_type='cuda', dtype=torch.float16):
             labels = batch["label"].detach() #.cpu().numpy()
@@ -148,7 +147,6 @@ def main():
     parser.add_argument("--project_name", type=str, default="ood")
     parser.add_argument("--alpha", type=float, default=2.0)
     parser.add_argument("--loss", type=str, default="margin")
-    parser.add_argument("--create_pickles", type=bool, default=False)
     args = parser.parse_args()
 
     wandb.init(project=args.project_name)
@@ -160,9 +158,10 @@ def main():
 
     num_labels = task_to_labels[args.task_name]
     config = LayoutLMConfig.from_pretrained(args.model_name_or_path, num_labels=num_labels) 
-         # Config params: hidden_act="new_gelu", num_hidden_layers=10 (12), hidden_size=(768), intermediate_size=(3072)  
+         # Config params: hidden_act="gelu_new", num_hidden_layers=10 (12), hidden_size=(768), intermediate_size=(3072)  
          # from_pretrained() params: torch_dtype, device_map, max_memory, load_in_8bit
     config.gradient_checkpointing = True
+    config.hidden_act="gelu_new"
     config.alpha = args.alpha
     config.loss = args.loss
     tokenizer = LayoutLMTokenizer.from_pretrained(args.model_name_or_path)
@@ -174,32 +173,15 @@ def main():
     datasets = ['rvl_cdip', 'ood']
     benchmarks = ()
 
-    # TODO: Implement save/load datasets from disk using datasets.save_to_disk() and datasets.load_dataset()
-    if args.create_pickles:
-        for dataset in datasets:
-            if dataset == args.task_name:
-                train_dataset, dev_dataset, test_dataset = load(dataset, tokenizer, max_seq_length=args.max_seq_length, is_id=True)
-                torch.save(train_dataset, '/mmfs1/gscratch/amath/wpm/data/train_dataset.pt')
-                torch.save(dev_dataset, '/mmfs1/gscratch/amath/wpm/data/dev_dataset.pt')
-                torch.save(test_dataset, '/mmfs1/gscratch/amath/wpm/data/test_dataset.pt')
-            else:
-                _, _, ood_dataset = load(dataset, tokenizer, max_seq_length=args.max_seq_length)
-                torch.save(ood_dataset, '/mmfs1/gscratch/amath/wpm/data/ood_dataset.pt')
-                benchmarks = (('rvl_cdip_' + dataset, ood_dataset),) + benchmarks
-    else:
-        #train_dataset = torch.load('/mmfs1/gscratch/amath/wpm/data/train_dataset.pt')
-        #dev_dataset = torch.load('/mmfs1/gscratch/amath/wpm/data/dev_dataset.pt')
-        #test_dataset = torch.load('/mmfs1/gscratch/amath/wpm/data/test_dataset.pt')
-        #ood_dataset = torch.load('/mmfs1/gscratch/amath/wpm/data/ood_dataset.pt')
         
-        for dataset in datasets:
-            if dataset == args.task_name:
-                train_dataset, dev_dataset, test_dataset = load(dataset, tokenizer, max_seq_length=args.max_seq_length, is_id=True)
-            else:
-                _, _, ood_dataset = load(dataset, tokenizer, max_seq_length=args.max_seq_length)
-                benchmarks = (('rvl_cdip_ood', ood_dataset),) + benchmarks
+    for dataset in datasets:
+        if dataset == args.task_name:
+            train_dataset, dev_dataset, test_dataset = load(dataset, tokenizer, max_seq_length=args.max_seq_length, is_id=True)
+        else:
+            _, _, ood_dataset = load(dataset, tokenizer, max_seq_length=args.max_seq_length)
+            benchmarks = (('rvl_cdip_ood', ood_dataset),) + benchmarks
 
-        train(args, model, train_dataset, dev_dataset, test_dataset, benchmarks)
+    train(args, model, train_dataset, dev_dataset, test_dataset, benchmarks)
 
 
 if __name__ == "__main__":

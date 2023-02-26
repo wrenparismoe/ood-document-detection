@@ -3,7 +3,7 @@ import numpy as np
 from torch.utils.data import DataLoader
 from sklearn.metrics import roc_auc_score
 from tqdm import tqdm
-import gc
+# import gc
 
 def merge_keys(l, keys):
     new_dict = {}
@@ -24,32 +24,29 @@ def evaluate_ood(args, model, features, ood, tag, rank=3):
     # Can we pass dataloader from outside loop to reuse each iteration? 
     dataloader = DataLoader(features, batch_size=args.batch_size, pin_memory=True, num_workers=4)
     in_scores = []
-    print("Begginning evaluate_ood()")
-    print("Forward pass test_dataset")
-    for batch in tqdm(dataloader):
+    for batch in tqdm(dataloader, desc="Evaluating OOD", postfix={'dataset': 'test'}, mininterval=2):
         model.eval()
         batch = {key: value.cuda(device) for key, value in batch.items()}
         with torch.no_grad():
             ood_keys = model.compute_ood(**batch)
             in_scores.append(ood_keys)
         del batch, ood_keys
-    in_scores = merge_keys(in_scores, keys)
-    del dataloader
+    # in_scores = merge_keys(in_scores, keys)
+    # del dataloader
 
     dataloader = DataLoader(ood, batch_size=args.batch_size, pin_memory=True, num_workers=4)
     out_scores = []
-    print("Forward pass ood_dataset")
-    for batch in tqdm(dataloader):
+    for batch in tqdm(dataloader, desc="Evaluating OOD", postfix={'dataset': 'ood'}, mininterval=2):
         model.eval()
         batch = {key: value.cuda(device) for key, value in batch.items()}
         with torch.no_grad():
             ood_keys = model.compute_ood(**batch)
             out_scores.append(ood_keys)
-        del batch, ood_keys
+        # del batch, ood_keys
     out_scores = merge_keys(out_scores, keys)
-    del dataloader
-    gc.collect()
-    torch.cuda.empty_cache()
+    # del dataloader
+    # gc.collect()
+    # torch.cuda.empty_cache()
     # TODO: Try without variable deletion and vRAM cache clearing. Watch for CUDAMemoryError
 
     outputs = {}
