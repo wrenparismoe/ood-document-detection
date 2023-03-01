@@ -31,7 +31,7 @@ def evaluate_ood(args, model, features, ood, tag, rank=3):
             ood_keys = model.compute_ood(**batch)
             in_scores.append(ood_keys)
         del batch, ood_keys
-    # in_scores = merge_keys(in_scores, keys)
+    in_scores = merge_keys(in_scores, keys)
     # del dataloader
 
     dataloader = DataLoader(ood, batch_size=args.batch_size, pin_memory=True, num_workers=4)
