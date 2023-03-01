@@ -71,7 +71,7 @@ echo "MASTER_ADDR="$MASTER_ADDR
 mkdir -p /tmp/wpm && tar -I lz4 -xf /mmfs1/gscratch/amath/wpm/data.tar.lz4 -C $_
 source ~/miniconda3/etc/profile.d/conda.sh
 conda activate venv-torch2
-CUDA_VISIBLE_DEVICES=0,1,2,3 srun /mmfs1/gscratch/amath/wpm/.venv/venv-torch2/bin/python run.py --num_train_epochs=8 --batch_size=64 --learning_rate=1e-4
+CUDA_VISIBLE_DEVICES=0,1,2,3 /mmfs1/gscratch/amath/wpm/.venv/venv-torch2/bin/python run.py --num_train_epochs=8 --batch_size=64 --learning_rate=1e-4
 ```
 
 We can submit the above job to SLURM with the command:
