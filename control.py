@@ -30,7 +30,7 @@ class ModelControl(LightningModule):
 
     def training_step(self, batch, batch_idx):
         batch = {key: value for key, value in batch.items()}
-        outputs = model(**batch)
+        outputs = self.model(**batch)
         loss, cos_loss = outputs[0], outputs[1]
         # NOTE: May need to use log_dict() instead of log() here
         self.log(
@@ -55,7 +55,7 @@ class ModelControl(LightningModule):
         labels = batch["label"]  # .detach().cpu().numpy()
         batch = {key: value for key, value in batch.items()}
         batch["label"] = None
-        outputs = model(**batch)
+        outputs = self.model(**batch)
         logits = outputs[0]  # .detach().cpu().numpy()
         return pl.EvalResult(labels, logits)
 
@@ -65,20 +65,34 @@ class ModelControl(LightningModule):
         preds = torch.concatenate(validation_step_outputs[1], axis=0)
 
         preds = torch.argmax(preds, axis=1)
-        result = {}
+        results = {}
         acc_score = accuracy_score(y_true=preds, y_pred=labels)
-        # if len(result) > 1:
-        #    result["score"] = np.mean(list(result.values())).item()
-        result["accuracy"] = acc_score
+        results["accuracy"] = acc_score
         # TODO: How to add 'tag' to the input parameters? Need for result logging in wandb
         results = {"{}_{}".format(tag, key): value for key, value in results.items()}
         # TODO: How to access current num_steps from here?
         self.log_dict(results, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        return pl.EvalResult(results)
 
     def test_step(self, batch, batch_idx):  # prepare_ood()
-        # Need to implement this method step-by-step outside of model.py class
+        # TODO: Need to implement prepare_ood() step-by-step outside of model.py class
         self.model.prepare_ood()
 
     def predict_step(self, batch, batch_idx, dataloader_idx=None):  # evaluate_ood()
-        # Need to implement this method step-by-step outside of evaluation.py
-        evaluate_ood()
+        # TODO: Need to implement evaluate_ood() step-by-step outside of evaluation.py
+        batch = {key: value for key, value in batch.items()}
+        ood_keys = self.model.compute_ood(**batch)
+        return ood_keys
+
+    def merge_keys(self, l, keys):
+        new_dict = {}
+        for key in keys:
+            new_dict[key] = []
+            for i in l:
+                new_dict[key] += i[key]
+        return new_dict
+
+    def predict_step_end(self, predict_step_outputs):
+        # TODO: Not implemented correctly. Extension of predict_step() is needed
+        ood_keys = torch.cat(predict_step_outputs, dim=0)
+        return ood_keys
