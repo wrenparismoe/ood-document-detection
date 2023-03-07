@@ -1,20 +1,22 @@
-import pytorch_lightning as pl
+import lightning.pytorch as pl
 import torch
-from pytorch_lightning import LightningModule, Callback
+import torch.nn.functional as F
 from transformers.optimization import AdamW, get_linear_schedule_with_warmup
 from sklearn.metrics import accuracy_score
 from transformers import LayoutLMConfig
 from utils import merge_keys
 from model import LayoutLMForSequenceClassification
 import numpy as np
+from sklearn.metrics import roc_auc_score
+from evaluation import get_auroc, get_fpr_95, stable_cumsum, fpr_and_fdr_at_recall
 
 task_to_labels = {
     "rvl_cdip": 16,
 }
 
 
-class LayoutLMModule(LightningModule):  # LightningModule
-    def __init__(self, args):
+class LayoutLMModule(pl.LightningModule):  # LightningModule
+    def __init__(self, args, layoutlm_config=None):
         super().__init__()
         self.args = args
         # Create model config and load pretraiend model
@@ -24,8 +26,8 @@ class LayoutLMModule(LightningModule):  # LightningModule
         config.hidden_act = "gelu_new"
         config.alpha = args.alpha
         config.loss = args.loss
-        # self.log({"batch_size": args.batch_size, "learning_rate": args.learning_rate, "epochs": args.num_train_epochs,},),
-        self.save_hyperparameters()
+
+        # self.save_hyperparameters()
         self.model = LayoutLMForSequenceClassification.from_pretrained(
             args.model_name_or_path, config=config
         )
@@ -126,7 +128,11 @@ class LayoutLMModule(LightningModule):  # LightningModule
         return result
 
     def validation_epoch_end(self, val_outputs):
-        """With multiple dataloaders, outputs will be a list of lists. The outer list contains one entry per dataloader, while the inner list contains the individual outputs of each validation step for that dataloader."""
+        """
+        With multiple dataloaders, outputs will be a list of lists.
+        The outer list contains one entry per dataloader, while the inner list
+        contains the individual outputs of each validation step for that dataloader.
+        """
         tags = ["dev", "test"]
         for idx, eval_output in enumerate(val_outputs):
             labels = (
@@ -146,23 +152,97 @@ class LayoutLMModule(LightningModule):  # LightningModule
             }
             self.logger.log_metrics(results, self.global_step)
 
+    def on_test_epoch_start(self):
+        self.bank = None
+        self.label_bank = None
+
     def test_step(self, batch, batch_idx):  # prepare_ood()
-        # TODO: Need to implement prepare_ood() step-by-step outside of model.py class
-        self.model.prepare_ood()
+        # Taken from self.model.prepare_ood()
+        batch = {key: value for key, value in batch.items()}
+        label = batch["label"]
+        outputs = self.model.layoutlm(
+            input_ids=batch["input_ids"],
+            bbox=batch["bbox"],
+            attention_mask=batch["attention_mask"],
+            token_type_ids=batch["token_type_ids"],
+        )
+        pooled = outputs[1]
+        if self.bank is None:
+            self.bank = pooled.detach()  # DIFF: removed .clone()
+            self.label_bank = label.detach()  # DIFF: removed .clone()
+        else:
+            self.bank = pooled.detach()  # DIFF: removed .clone()
+            self.label_bank = label.detach()  # DIFF: removed .clone()
+            self.bank = torch.cat([self.bank, self.bank], dim=0)
+            self.label_bank = torch.cat([self.label_bank, self.label_bank], dim=0)
+        return self.bank, self.label_bank
+
+    def test_epoch_end(self, test_outputs):
+        self.bank = torch.cat([batch_output[0] for batch_output in test_outputs])
+        self.label_bank = torch.cat([batch_output[1] for batch_output in test_outputs])
+
+        self.model.norm_bank = F.normalize(self.bank, dim=-1)
+        N, d = self.bank.size()
+        self.model.all_classes = self.label_bank.unique()
+        self.model.class_mean = torch.zeros(
+            self.model.all_classes.max() + 1, d, dtype=torch.float32
+        )
+        for c in self.model.all_classes:
+            self.model.class_mean[c] = self.bank[self.label_bank == c].mean(0)
+        centered_bank = self.bank - self.model.class_mean[self.label_bank]
+        self.model.class_var = torch.linalg.pinv(
+            torch.cov(centered_bank.T, correction=0), hermitian=True
+        )
+
+        """
+            results = evaluate_ood(args, model, test_dataset, ood_dataset, tag=tag)
+            wandb.log(results, step=num_steps)
+        """
+
+    def on_predict_start(self):
+        self.keys = ["softmax", "maha", "cosine", "energy"]
+
+    def on_predict_epoch_start(self):
+        pass
 
     def predict_step(self, batch, batch_idx, dataloader_idx=None):  # evaluate_ood()
-        # TODO: Need to implement evaluate_ood() step-by-step outside of evaluation.py
+        # [DataLoader(test_dataset), DataLoader(ood_dataset)]
         batch = {key: value for key, value in batch.items()}
         ood_keys = self.model.compute_ood(**batch)
         return ood_keys
 
-    def predict_step_end(self, predict_step_outputs):
-        # TODO: Not implemented correctly. Extension of predict_step() is needed
-        ood_keys = torch.cat(predict_step_outputs, dim=0)
-        return ood_keys
+    def on_predict_epoch_end(self, evaluate_ood_outputs):
+        # Concatenate outputs from test_dataset
+        self.in_scores = merge_keys(
+            [batch_output for batch_output in evaluate_ood_outputs[0]],
+            keys=self.keys,
+        )
+        # Concatenate outputs from ood_dataset
+        self.out_scores = merge_keys(
+            [batch_output for batch_output in evaluate_ood_outputs[1]],
+            keys=self.keys,
+        )
+
+    def on_predict_end(self):
+        tag = "rvl_cdip_ood"
+        outputs = {}
+        for key in self.keys:
+            ins = np.array(self.in_scores[key], dtype=np.float64)
+            outs = np.array(self.out_scores[key], dtype=np.float64)
+            inl = np.ones_like(ins).astype(np.int64)
+            outl = np.zeros_like(outs).astype(np.int64)
+            scores = np.concatenate([ins, outs], axis=0)
+            labels = np.concatenate([inl, outl], axis=0)
+
+            auroc, fpr_95 = get_auroc(labels, scores), get_fpr_95(labels, scores)
+
+            outputs[tag + "_" + key + "_auroc"] = auroc
+            outputs[tag + "_" + key + "_fpr95"] = fpr_95
+
+        self.logger.log_metrics(outputs, self.global_step)
 
 
-class LayoutLMCallback(Callback):  # Callback
+class LayoutLMCallback(pl.Callback):  # Callback
     def __init__(self, args):
         super().__init__()
         self.args = args

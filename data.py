@@ -1,6 +1,8 @@
 import json
-
 import datasets
+from lightning.pytorch import LightningDataModule
+from torch.utils.data import DataLoader
+from transformers import LayoutLMTokenizer
 import pandas as pd
 from datasets import (
     Array2D,
@@ -12,9 +14,6 @@ from datasets import (
     load_dataset,
     load_from_disk,
 )
-from pytorch_lightning import LightningDataModule
-from torch.utils.data import Dataloader
-from transformers import LayoutLMTokenizer
 
 datasets.logging.set_verbosity(datasets.logging.ERROR)
 
@@ -160,8 +159,6 @@ class DataModule(LightningDataModule):
 
     def prepare_data(self):
         # preliminary steps only called on 1 GPU/TPU in distributed
-        if self.reuse_from_disk:
-            return
 
         train_df = pd.read_csv("/tmp/wpm/data/processed_train.csv")
         val_df = pd.read_csv("/tmp/wpm/data/processed_val.csv")
@@ -259,7 +256,7 @@ class DataModule(LightningDataModule):
             shuffle=True,
             drop_last=True,
             pin_memory=True,
-            num_workers=8,
+            num_workers=16,
         )
 
     def val_dataloader(self):
