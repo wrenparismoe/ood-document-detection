@@ -1,8 +1,6 @@
 import json
+
 import datasets
-from lightning.pytorch import LightningDataModule
-from torch.utils.data import DataLoader
-from transformers import LayoutLMTokenizer
 import pandas as pd
 from datasets import (
     Array2D,
@@ -14,6 +12,9 @@ from datasets import (
     load_dataset,
     load_from_disk,
 )
+from lightning.pytorch import LightningDataModule
+from torch.utils.data import DataLoader
+from transformers import LayoutLMTokenizer
 
 datasets.logging.set_verbosity(datasets.logging.ERROR)
 
@@ -22,14 +23,6 @@ class DataModule(LightningDataModule):
     def __init__(
         self,
         args,
-        train_size=None,
-        val_size=None,
-        test_size=None,
-        ood_size=None,
-        use_from_disk=True,
-        reuse_from_disk=False,
-        save_parquets=False,
-        load_parquets=False,
         tokenizer=LayoutLMTokenizer.from_pretrained("microsoft/layoutlm-base-uncased"),
         max_seq_length=512,
     ):
@@ -38,21 +31,22 @@ class DataModule(LightningDataModule):
         dataset to be used in train/val/test splits with LayoutLM model.
         """
         super().__init__()
+        self.args = args
         self.batch_size = args.batch_size
-        self.train_size = train_size
-        self.val_size = val_size
-        if test_size is None:
-            if ood_size is not None:
-                self.test_size = ood_size
+        self.train_size = args.train_size
+        self.val_size = args.val_size
+        if args.test_size is None:
+            if args.ood_size is not None:
+                self.test_size = args.ood_size
             else:
                 self.test_size = 3000
         else:
-            self.test_size = test_size
-        self.ood_size = ood_size
-        self.use_from_disk = use_from_disk
-        self.reuse_from_disk = reuse_from_disk
-        self.save_parquets = save_parquets
-        self.load_parquets = load_parquets
+            self.test_size = args.test_size
+        self.ood_size = args.ood_size
+        self.use_from_disk = args.use_from_disk
+        self.reuse_from_disk = args.reuse_from_disk
+        self.save_parquets = args.save_parquets
+        self.load_parquets = args.load_parquets
         self.max_seq_length = max_seq_length
         self.tokenizer = tokenizer
 
@@ -159,6 +153,8 @@ class DataModule(LightningDataModule):
 
     def prepare_data(self):
         # preliminary steps only called on 1 GPU/TPU in distributed
+        if self.reuse_from_disk:
+            return
 
         train_df = pd.read_csv("/tmp/wpm/data/processed_train.csv")
         val_df = pd.read_csv("/tmp/wpm/data/processed_val.csv")
@@ -204,7 +200,6 @@ class DataModule(LightningDataModule):
             lambda example: self.encode_example(example),
             features=self.features,
             keep_in_memory=True,
-            num_proc=4,
         )
         test_dataset.set_format(
             type="torch",
@@ -238,15 +233,45 @@ class DataModule(LightningDataModule):
         # make assignments here (val/train/test split) - called on every process in DDP
         # Load tokenized datasets from disk here
         if self.use_from_disk:
-            self.train_dataset = load_from_disk("/tmp/wpm/data/train_dataset")
-            self.dev_dataset = load_from_disk("/tmp/wpm/data/dev_dataset")
-            self.test_dataset = load_from_disk("/tmp/wpm/data/test_dataset")
-            self.ood_dataset = load_from_disk("/tmp/wpm/data/ood_dataset")
+            train_dataset = load_from_disk("/tmp/wpm/data/train_dataset")
+            if self.reuse_from_disk and self.train_size > train_dataset.shape[0]:
+                raise ValueError("Train size is larger than the dataset size on disk")
+            self.train_dataset = train_dataset[0:self.train_size]
+            
+            
+            dev_dataset = load_from_disk("/tmp/wpm/data/dev_dataset")
+            if self.reuse_from_disk and self.val_size > dev_dataset.shape[0]:
+                raise ValueError("Val size is larger than the dataset size on disk")
+            self.dev_dataset = dev_dataset[0:self.val_size]
+            test_dataset = load_from_disk("/tmp/wpm/data/test_dataset")
+            if self.reuse_from_disk and self.test_size > test_dataset.shape[0]:
+                raise ValueError("Test size is larger than the dataset size on disk")
+            self.test_dataset = test_dataset[0:self.test_size]
+            ood_dataset = load_from_disk("/tmp/wpm/data/ood_dataset")
+            if self.reuse_from_disk and self.ood_size > ood_dataset.shape[0]:
+                raise ValueError("OOD size is larger than the dataset size on disk")
+            self.ood_dataset = ood_dataset[0:self.ood_size]
         elif self.load_parquets:
-            self.train_dataset = load_dataset("tmp/wpm/data/train_dataset.parquet")
-            self.dev_dataset = load_dataset("tmp/wpm/data/dev_dataset.parquet")
-            self.test_dataset = load_dataset("tmp/wpm/data/test_dataset.parquet")
-            self.ood_dataset = load_dataset("tmp/wpm/data/ood_dataset.parquet")
+            self.train_dataset = Dataset.from_dict(
+                load_dataset("tmp/wpm/data/train_dataset.parquet")
+            )
+            self.train_dataset = train_dataset[0:self.train_size]
+
+            self.dev_dataset = Dataset.from_dict(
+                load_dataset("tmp/wpm/data/dev_dataset.parquet")
+            )
+            self.dev_dataset = dev_dataset[0:self.dev_size]
+
+            self.test_dataset = Dataset.from_dict(
+                load_dataset("tmp/wpm/data/test_dataset.parquet")
+            )
+             self.dev_dataset = dev_dataset[0:self.dev_size]
+
+            self.ood_dataset = Dataset.from_dict(
+                load_dataset("tmp/wpm/data/ood_dataset.parquet")
+            )
+             self.ood_dataset = ood_dataset[0:self.ood_size]
+
 
     def train_dataloader(self):
         # Train method
@@ -256,7 +281,7 @@ class DataModule(LightningDataModule):
             shuffle=True,
             drop_last=True,
             pin_memory=True,
-            num_workers=16,
+            num_workers=8,
         )
 
     def val_dataloader(self):
@@ -268,7 +293,7 @@ class DataModule(LightningDataModule):
                 shuffle=False,
                 drop_last=False,
                 pin_memory=True,
-                num_workers=8,
+                num_workers=4,
             ),
             DataLoader(
                 self.test_dataset,
@@ -276,7 +301,7 @@ class DataModule(LightningDataModule):
                 shuffle=False,
                 drop_last=False,
                 pin_memory=True,
-                num_workers=8,
+                num_workers=4,
             ),
         ]
 
@@ -288,7 +313,7 @@ class DataModule(LightningDataModule):
             shuffle=False,
             drop_last=False,
             pin_memory=True,
-            num_workers=8,
+            num_workers=4,
         )
 
     def predict_dataloader(self):
@@ -300,7 +325,7 @@ class DataModule(LightningDataModule):
                 shuffle=False,
                 drop_last=False,
                 pin_memory=True,
-                num_workers=8,
+                num_workers=4,
             ),
             DataLoader(
                 self.ood_dataset,
@@ -308,6 +333,6 @@ class DataModule(LightningDataModule):
                 shuffle=False,
                 drop_last=False,
                 pin_memory=True,
-                num_workers=8,
+                num_workers=4,
             ),
         ]

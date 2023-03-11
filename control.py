@@ -1,14 +1,13 @@
 import lightning.pytorch as pl
+import numpy as np
 import torch
 import torch.nn.functional as F
-from transformers.optimization import AdamW, get_linear_schedule_with_warmup
 from sklearn.metrics import accuracy_score
 from transformers import LayoutLMConfig
-from utils import merge_keys
+from transformers.optimization import AdamW, get_linear_schedule_with_warmup
+
+from evaluation import get_auroc, get_fpr_95
 from model import LayoutLMForSequenceClassification
-import numpy as np
-from sklearn.metrics import roc_auc_score
-from evaluation import get_auroc, get_fpr_95, stable_cumsum, fpr_and_fdr_at_recall
 
 task_to_labels = {
     "rvl_cdip": 16,
@@ -108,8 +107,8 @@ class LayoutLMModule(pl.LightningModule):  # LightningModule
         batch = {key: value for key, value in batch.items()}
         outputs = self.model(**batch)
         loss, cos_loss = outputs[0], outputs[1]
-        self.logger.log_metrics({"train_loss": loss}, self.global_step)
-        self.logger.log_metrics({"train_cos_loss": cos_loss}, self.global_step)
+        # self.logger.log_metrics({"train_loss": loss}, self.global_step)
+        # self.logger.log_metrics({"train_cos_loss": cos_loss}, self.global_step)
         return loss
 
     def validation_step(self, batch, batch_idx, dataloader_idx):
@@ -120,7 +119,7 @@ class LayoutLMModule(pl.LightningModule):  # LightningModule
         logits = outputs[0]  # .detach().cpu().numpy()
         return labels, logits
 
-    def _compute_metrics(preds, labels):
+    def _compute_metrics(self, preds, labels):
         preds = np.argmax(preds, axis=1)
         result = {}
         acc_score = accuracy_score(y_true=preds, y_pred=labels)
@@ -133,8 +132,14 @@ class LayoutLMModule(pl.LightningModule):  # LightningModule
         The outer list contains one entry per dataloader, while the inner list
         contains the individual outputs of each validation step for that dataloader.
         """
-        tags = ["dev", "test"]
+        # print("val_size:", self.args.val_size)
+        # print(f"VAL_OUTPUTS --> type: {type(val_outputs)}, length: {len(val_outputs)}")
+        tags = ["val", "test"]
         for idx, eval_output in enumerate(val_outputs):
+            # print(
+            #     f"    EVAL_OUTPUT ({idx}) --> type: {type(eval_output)},",
+            #     "size: {eval_output.size()}, value: {eval_output=}",
+            # )
             labels = (
                 torch.cat([batch_output[0] for batch_output in eval_output])
                 .cpu()
@@ -145,12 +150,17 @@ class LayoutLMModule(pl.LightningModule):  # LightningModule
                 .cpu()
                 .numpy()
             )
-
+            # print(
+            #     f"        PREDS --> type: {type(preds)}, shape: {preds.shape}, value: {preds=}"
+            # )
+            # print(
+            #     f"        LABELS --> type: {type(labels)}, shape: {labels.shape}, value: {labels=}"
+            # )
             results = self._compute_metrics(preds, labels)
             results = {
                 "{}_{}".format(tags[idx], key): value for key, value in results.items()
             }
-            self.logger.log_metrics(results, self.global_step)
+            # self.logger.log_metrics(results, self.global_step)
 
     def on_test_epoch_start(self):
         self.bank = None
@@ -185,19 +195,17 @@ class LayoutLMModule(pl.LightningModule):  # LightningModule
         N, d = self.bank.size()
         self.model.all_classes = self.label_bank.unique()
         self.model.class_mean = torch.zeros(
-            self.model.all_classes.max() + 1, d, dtype=torch.float32
+            self.model.all_classes.max() + 1,
+            d,
+            dtype=torch.float32,
+            device=self.bank.device,
         )
         for c in self.model.all_classes:
             self.model.class_mean[c] = self.bank[self.label_bank == c].mean(0)
-        centered_bank = self.bank - self.model.class_mean[self.label_bank]
-        self.model.class_var = torch.linalg.pinv(
-            torch.cov(centered_bank.T, correction=0), hermitian=True
-        )
-
-        """
-            results = evaluate_ood(args, model, test_dataset, ood_dataset, tag=tag)
-            wandb.log(results, step=num_steps)
-        """
+            centered_bank = self.bank - self.model.class_mean[self.label_bank]
+            self.model.class_var = torch.linalg.pinv(
+                torch.cov(centered_bank.T, correction=0), hermitian=True
+            )
 
     def on_predict_start(self):
         self.keys = ["softmax", "maha", "cosine", "energy"]
@@ -211,14 +219,26 @@ class LayoutLMModule(pl.LightningModule):  # LightningModule
         ood_keys = self.model.compute_ood(**batch)
         return ood_keys
 
+    def _merge_keys(self, ood_keys, keys):
+        new_dict = {}
+        for key in keys:
+            new_dict[key] = []
+            for i in ood_keys:
+                new_dict[key] += i[key]
+        return new_dict
+
     def on_predict_epoch_end(self, evaluate_ood_outputs):
+        # print(
+        #     f"EVALUATE_OOD_OUTPUTS --> type: {type(evaluate_ood_outputs)},",
+        #     "value: {evaluate_ood_outputs=}",
+        # )
         # Concatenate outputs from test_dataset
-        self.in_scores = merge_keys(
+        self.in_scores = self._merge_keys(
             [batch_output for batch_output in evaluate_ood_outputs[0]],
             keys=self.keys,
         )
         # Concatenate outputs from ood_dataset
-        self.out_scores = merge_keys(
+        self.out_scores = self._merge_keys(
             [batch_output for batch_output in evaluate_ood_outputs[1]],
             keys=self.keys,
         )
@@ -239,7 +259,7 @@ class LayoutLMModule(pl.LightningModule):  # LightningModule
             outputs[tag + "_" + key + "_auroc"] = auroc
             outputs[tag + "_" + key + "_fpr95"] = fpr_95
 
-        self.logger.log_metrics(outputs, self.global_step)
+        # self.logger.log_metrics(outputs, self.global_step)
 
 
 class LayoutLMCallback(pl.Callback):  # Callback

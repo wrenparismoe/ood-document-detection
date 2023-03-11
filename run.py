@@ -1,12 +1,14 @@
 import argparse
-from utils import set_seed
-import warnings
 import os
-from lightning.pytorch.loggers import WandbLogger
+import warnings
+
 from lightning.pytorch import Trainer
-from lightning.pytorch.accelerators import find_usable_cuda_devices
+
+# from lightning.pytorch.loggers import WandbLogger
+# from lightning.pytorch.accelerators import find_usable_cuda_devices
 from control import LayoutLMModule
 from data import DataModule
+from utils import set_seed
 
 # from lightning.pytorch.strategy import DDPSPawnStrategy
 
@@ -25,40 +27,45 @@ def main():
     parser.add_argument("--adam_epsilon", default=1e-6, type=float)
     parser.add_argument("--warmup_ratio", default=0.06, type=float)
     parser.add_argument("--weight_decay", default=0.01, type=float)
-    parser.add_argument("--num_train_epochs", default=10.0, type=float)
+    parser.add_argument("--num_train_epochs", default=10, type=int)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--project_name", type=str, default="ood")
     parser.add_argument("--alpha", type=float, default=2.0)
     parser.add_argument("--loss", type=str, default="margin")
+    # add arguments for train, val, test, ood sizes
+    parser.add_argument("--train_size", type=int, default=None)
+    parser.add_argument("--val_size", type=int, default=None)
+    parser.add_argument("--test_size", type=int, default=None)
+    parser.add_argument("--ood_size", type=int, default=None)
+    parser.add_argument("--use_from_disk", type=bool, default=True)
+    parser.add_argument("--reuse_from_disk", action="store_true", help="Reuse data from disk")
+    parser.add_argument("--save_parquets", type=bool, default=False)
+    parser.add_argument("--load_parquets", type=bool, default=False)
+    parser.add_argument("--process_data_only", action="store_true", help="Exit after processing data")
     args = parser.parse_args()
 
-    data = DataModule(
-        args,
-        train_size=20_000,
-        val_size=5_000,
-        test_size=3_000,
-        ood_size=3_000,
-        use_from_disk=True,
-        reuse_from_disk=True,
-        save_parquets=True,
-    )
+    data = DataModule(args)
     data.prepare_data()
+    if args.process_data_only:
+        print("Exiting after processing data")
+        return
+        
     data.setup(stage="fit")
 
     set_seed(args)
 
     model = LayoutLMModule(args)
 
-    wandb_logger = WandbLogger(project=args.project_name)
-    wandb_logger.experiment.config.update(vars(args))
+    # wandb_logger = WandbLogger(project=args.project_name)
+    # wandb_logger.experiment.config.update(vars(args))
     # wandb_logger.watch(model, log="all")
     # Trainer Flags: precision=16,
     trainer = Trainer(
-        gpus=4,
+        gpus=1,
         # devices=find_usable_cuda_devices(4),
         accelerator="gpu",
-        strategy="ddp_spawn",
-        logger=wandb_logger,
+        # strategy="ddp_spawn",
+        # logger=wandb_logger,
         max_epochs=args.num_train_epochs,
     )
 
@@ -69,9 +76,10 @@ def main():
 
 
 if __name__ == "__main__":
-    ### Set the enviornment varaible DATA_DIR to the directory where the data is stored
+    # Set the enviornment varaible DATA_DIR to the directory where the data is stored
     os.chdir("/tmp/wpm")
 
-    # os.environ['PYTORCH_CUDA_ALLOC_CONF'] = "max_split_size_mb:512,garbage_collection_threshold:0.82"
+    # os.environ['PYTORCH_CUDA_ALLOC_CONF'] = \
+    #   "max_split_size_mb:512,garbage_collection_threshold:0.82"
 
     main()
