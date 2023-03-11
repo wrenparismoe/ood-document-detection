@@ -107,9 +107,12 @@ class LayoutLMModule(pl.LightningModule):  # LightningModule
         batch = {key: value for key, value in batch.items()}
         outputs = self.model(**batch)
         loss, cos_loss = outputs[0], outputs[1]
-        # self.logger.log_metrics({"train_loss": loss}, self.global_step)
-        # self.logger.log_metrics({"train_cos_loss": cos_loss}, self.global_step)
+        self.logger.log_metrics({"train_loss": loss}, self.global_step)
+        self.logger.log_metrics({"train_cos_loss": cos_loss}, self.global_step)
         return loss
+
+    def training_step_end(self, training_step_outputs):
+        return training_step_outputs
 
     def validation_step(self, batch, batch_idx, dataloader_idx):
         labels = batch["label"]  # .detach().cpu().numpy()
@@ -118,6 +121,9 @@ class LayoutLMModule(pl.LightningModule):  # LightningModule
         outputs = self.model(**batch)
         logits = outputs[0]  # .detach().cpu().numpy()
         return labels, logits
+
+    def validation_step_end(self, validation_step_outputs):
+        return validation_step_outputs
 
     def _compute_metrics(self, preds, labels):
         preds = np.argmax(preds, axis=1)
@@ -160,7 +166,7 @@ class LayoutLMModule(pl.LightningModule):  # LightningModule
             results = {
                 "{}_{}".format(tags[idx], key): value for key, value in results.items()
             }
-            # self.logger.log_metrics(results, self.global_step)
+            self.logger.log_metrics(results, self.global_step)
 
     def on_test_epoch_start(self):
         self.bank = None
@@ -186,6 +192,9 @@ class LayoutLMModule(pl.LightningModule):  # LightningModule
             self.bank = torch.cat([self.bank, self.bank], dim=0)
             self.label_bank = torch.cat([self.label_bank, self.label_bank], dim=0)
         return self.bank, self.label_bank
+
+    def test_step_end(self, test_step_outputs):
+        return test_step_outputs
 
     def test_epoch_end(self, test_outputs):
         self.bank = torch.cat([batch_output[0] for batch_output in test_outputs])
@@ -259,7 +268,7 @@ class LayoutLMModule(pl.LightningModule):  # LightningModule
             outputs[tag + "_" + key + "_auroc"] = auroc
             outputs[tag + "_" + key + "_fpr95"] = fpr_95
 
-        # self.logger.log_metrics(outputs, self.global_step)
+        self.logger.log_metrics(outputs, self.global_step)
 
 
 class LayoutLMCallback(pl.Callback):  # Callback

@@ -45,6 +45,7 @@ class DataModule(LightningDataModule):
         self.ood_size = args.ood_size
         self.use_from_disk = args.use_from_disk
         self.reuse_from_disk = args.reuse_from_disk
+        self.save_to_disk = args.save_to_disk
         self.save_parquets = args.save_parquets
         self.load_parquets = args.load_parquets
         self.max_seq_length = max_seq_length
@@ -174,56 +175,57 @@ class DataModule(LightningDataModule):
             self.parse_json, keep_in_memory=True, num_proc=4
         )
 
-        train_dataset = updated_train.map(
+        self.train_dataset_temp = updated_train.map(
             lambda example: self.encode_example(example),
             features=self.features,
             keep_in_memory=True,
             num_proc=16,
         )
-        train_dataset.set_format(
+        self.train_dataset_temp.set_format(
             type="torch",
             columns=["input_ids", "bbox", "attention_mask", "token_type_ids", "label"],
         )
 
-        dev_dataset = updated_val.map(
+        self.dev_dataset_temp = updated_val.map(
             lambda example: self.encode_example(example),
             features=self.features,
             keep_in_memory=True,
             num_proc=8,
         )
-        dev_dataset.set_format(
+        self.dev_dataset_temp.set_format(
             type="torch",
             columns=["input_ids", "bbox", "attention_mask", "token_type_ids", "label"],
         )
 
-        test_dataset = updated_test.map(
+        self.test_dataset_temp = updated_test.map(
             lambda example: self.encode_example(example),
             features=self.features,
             keep_in_memory=True,
         )
-        test_dataset.set_format(
+        self.test_dataset_temp.set_format(
             type="torch",
             columns=["input_ids", "bbox", "attention_mask", "token_type_ids", "label"],
         )
 
-        ood_dataset = updated_ood.map(
+        self.ood_dataset_temp = updated_ood.map(
             lambda example: self.encode_ood_example(example),
             features=self.ood_features,
             keep_in_memory=True,
             num_proc=4,
         )
-        ood_dataset.set_format(
+        self.ood_dataset_temp.set_format(
             type="torch",
             columns=["input_ids", "bbox", "attention_mask", "token_type_ids", "label"],
         )
 
         # Tokenize,
         # Save processed datasets to disk (also parquet files)
-        train_dataset.save_to_disk("/tmp/wpm/data/train_dataset")
-        dev_dataset.save_to_disk("/tmp/wpm/data/dev_dataset")
-        test_dataset.save_to_disk("/tmp/wpm/data/test_dataset")
-        ood_dataset.save_to_disk("/tmp/wpm/data/ood_dataset")
-        if self.save_parquets:
+        if self.save_to_disk:
+            train_dataset.save_to_disk("/tmp/wpm/data/train_dataset")
+            dev_dataset.save_to_disk("/tmp/wpm/data/dev_dataset")
+            test_dataset.save_to_disk("/tmp/wpm/data/test_dataset")
+            ood_dataset.save_to_disk("/tmp/wpm/data/ood_dataset")
+        elif self.save_parquets:
             train_dataset.to_parquet("/tmp/wpm/data/train_dataset.parquet")
             dev_dataset.to_parquet("/tmp/wpm/data/dev_dataset.parquet")
             test_dataset.to_parquet("/tmp/wpm/data/test_dataset.parquet")
@@ -265,13 +267,17 @@ class DataModule(LightningDataModule):
             self.test_dataset = Dataset.from_dict(
                 load_dataset("tmp/wpm/data/test_dataset.parquet")
             )
-             self.dev_dataset = dev_dataset[0:self.dev_size]
+            self.dev_dataset = dev_dataset[0:self.dev_size]
 
             self.ood_dataset = Dataset.from_dict(
                 load_dataset("tmp/wpm/data/ood_dataset.parquet")
             )
-             self.ood_dataset = ood_dataset[0:self.ood_size]
-
+            self.ood_dataset = ood_dataset[0:self.ood_size]
+        else:
+            self.train_dataset = self.train_dataset_temp
+            self.dev_dataset = self.dev_dataset_temp
+            self.test_dataset = self.test_dataset_temp
+            self.ood_dataset = self.ood_dataset_temp
 
     def train_dataloader(self):
         # Train method
