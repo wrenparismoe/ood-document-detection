@@ -43,7 +43,7 @@ class DataModule(LightningDataModule):
         else:
             self.test_size = args.test_size
         self.ood_size = args.ood_size
-        self.use_from_disk = args.use_from_disk
+        #self.use_from_disk = args.use_from_disk
         self.reuse_from_disk = args.reuse_from_disk
         self.save_to_disk = args.save_to_disk
         self.save_parquets = args.save_parquets
@@ -154,7 +154,7 @@ class DataModule(LightningDataModule):
 
     def prepare_data(self):
         # preliminary steps only called on 1 GPU/TPU in distributed
-        if self.reuse_from_disk:
+        if self.reuse_from_disk or self.use_parquets:
             return
 
         train_df = pd.read_csv("/tmp/wpm/data/processed_train.csv")
@@ -221,36 +221,34 @@ class DataModule(LightningDataModule):
         # Tokenize,
         # Save processed datasets to disk (also parquet files)
         if self.save_to_disk:
-            train_dataset.save_to_disk("/tmp/wpm/data/train_dataset")
-            dev_dataset.save_to_disk("/tmp/wpm/data/dev_dataset")
-            test_dataset.save_to_disk("/tmp/wpm/data/test_dataset")
-            ood_dataset.save_to_disk("/tmp/wpm/data/ood_dataset")
+            train_dataset_temp.save_to_disk("/tmp/wpm/data/train_dataset")
+            dev_dataset_temp.save_to_disk("/tmp/wpm/data/dev_dataset")
+            test_dataset_temp.save_to_disk("/tmp/wpm/data/test_dataset")
+            ood_dataset_temp.save_to_disk("/tmp/wpm/data/ood_dataset")
         elif self.save_parquets:
-            train_dataset.to_parquet("/tmp/wpm/data/train_dataset.parquet")
-            dev_dataset.to_parquet("/tmp/wpm/data/dev_dataset.parquet")
-            test_dataset.to_parquet("/tmp/wpm/data/test_dataset.parquet")
-            ood_dataset.to_parquet("/tmp/wpm/data/ood_dataset.parquet")
+            train_dataset_temp.to_parquet("/tmp/wpm/data/train_dataset.parquet")
+            dev_dataset_temp.to_parquet("/tmp/wpm/data/dev_dataset.parquet")
+            test_dataset_temp.to_parquet("/tmp/wpm/data/test_dataset.parquet")
+            ood_dataset_temp.to_parquet("/tmp/wpm/data/ood_dataset.parquet")
 
     def setup(self, stage=None):
         # make assignments here (val/train/test split) - called on every process in DDP
         # Load tokenized datasets from disk here
-        if self.use_from_disk:
+        if self.reuse_from_disk:
             train_dataset = load_from_disk("/tmp/wpm/data/train_dataset")
-            if self.reuse_from_disk and self.train_size > train_dataset.shape[0]:
+            if self.train_size > train_dataset.shape[0]:
                 raise ValueError("Train size is larger than the dataset size on disk")
             self.train_dataset = train_dataset[0:self.train_size]
-            
-            
             dev_dataset = load_from_disk("/tmp/wpm/data/dev_dataset")
-            if self.reuse_from_disk and self.val_size > dev_dataset.shape[0]:
+            if self.val_size > dev_dataset.shape[0]:
                 raise ValueError("Val size is larger than the dataset size on disk")
             self.dev_dataset = dev_dataset[0:self.val_size]
             test_dataset = load_from_disk("/tmp/wpm/data/test_dataset")
-            if self.reuse_from_disk and self.test_size > test_dataset.shape[0]:
+            if self.test_size > test_dataset.shape[0]:
                 raise ValueError("Test size is larger than the dataset size on disk")
             self.test_dataset = test_dataset[0:self.test_size]
             ood_dataset = load_from_disk("/tmp/wpm/data/ood_dataset")
-            if self.reuse_from_disk and self.ood_size > ood_dataset.shape[0]:
+            if self.ood_size > ood_dataset.shape[0]:
                 raise ValueError("OOD size is larger than the dataset size on disk")
             self.ood_dataset = ood_dataset[0:self.ood_size]
         elif self.load_parquets:

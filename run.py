@@ -4,8 +4,8 @@ import warnings
 
 from lightning.pytorch import Trainer
 
-# from lightning.pytorch.loggers import WandbLogger
-# from lightning.pytorch.accelerators import find_usable_cuda_devices
+from lightning.pytorch.loggers import WandbLogger
+from lightning.pytorch.accelerators import find_usable_cuda_devices
 from control import LayoutLMModule
 from data import DataModule
 from utils import set_seed
@@ -37,7 +37,6 @@ def main():
     parser.add_argument("--val_size", type=int, default=None)
     parser.add_argument("--test_size", type=int, default=None)
     parser.add_argument("--ood_size", type=int, default=None)
-    parser.add_argument("--use_from_disk", action="store_true", help="Use data from disk")
     parser.add_argument("--reuse_from_disk", action="store_true", help="Reuse data from disk")
     parser.add_argument("--save_parquets", action="store_true", help="Save data to parquet")
     parser.add_argument("--load_parquets", action="store_true", help="Load data from parquet")
@@ -47,20 +46,21 @@ def main():
     args = parser.parse_args()
 
     data = DataModule(args)
+    print("Processing data")
     data.prepare_data()
     if args.process_data_only:
         print("Exiting after processing data")
         return
-        
+    print("Loading data")
     data.setup(stage="fit")
 
     set_seed(args)
-
+    print("Initializing model")
     model = LayoutLMModule(args)
 
-    # wandb_logger = WandbLogger(project=args.project_name)
-    # wandb_logger.experiment.config.update(vars(args))
-    # wandb_logger.watch(model, log="all")
+    wandb_logger = WandbLogger(project=args.project_name)
+    #wandb_logger.experiment.config.update(vars(args))
+    #wandb_logger.watch(model, log="all")
     # Trainer Flags: precision=16,
     trainer = Trainer(
         gpus=4,
@@ -69,11 +69,15 @@ def main():
         strategy="ddp_spawn",
         logger=wandb_logger,
         max_epochs=args.num_train_epochs,
+        benchmark=True,
+        precision=16
     )
-
+    print("Running trainer.fit()")
     trainer.fit(model, datamodule=data)
-    trainer.validate(model, datamodule=data, verbose=True)
+    #trainer.validate(model, datamodule=data, verbose=True)
+    print("Running trainer.test()")
     trainer.test(model, datamodule=data, verbose=True)
+    print("Running trainer.predict()")
     trainer.predict(model, datamodule=data)
 
 

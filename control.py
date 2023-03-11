@@ -21,12 +21,12 @@ class LayoutLMModule(pl.LightningModule):  # LightningModule
         # Create model config and load pretraiend model
         config = LayoutLMConfig.from_pretrained(args.model_name_or_path)
         config.num_labels = task_to_labels[args.task_name]
-        config.gradient_checkpointing = True
+        #config.gradient_checkpointing = True
         config.hidden_act = "gelu_new"
         config.alpha = args.alpha
         config.loss = args.loss
 
-        # self.save_hyperparameters()
+        self.save_hyperparameters()
         self.model = LayoutLMForSequenceClassification.from_pretrained(
             args.model_name_or_path, config=config
         )
