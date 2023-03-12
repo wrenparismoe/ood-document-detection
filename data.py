@@ -224,7 +224,7 @@ class DataModule(LightningDataModule):
             self.dev_dataset_temp.save_to_disk("/tmp/wpm/data/dev_dataset")
             self.test_dataset_temp.save_to_disk("/tmp/wpm/data/test_dataset")
             self.ood_dataset_temp.save_to_disk("/tmp/wpm/data/ood_dataset")
-        elif self.save_parquets:
+        if self.save_parquets:
             self.train_dataset_temp.to_parquet("/tmp/wpm/data/train_dataset.parquet")
             self.dev_dataset_temp.to_parquet("/tmp/wpm/data/dev_dataset.parquet")
             self.test_dataset_temp.to_parquet("/tmp/wpm/data/test_dataset.parquet")
