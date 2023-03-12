@@ -3,9 +3,9 @@ import os
 import warnings
 
 from lightning.pytorch import Trainer
-
-from lightning.pytorch.loggers import WandbLogger
 from lightning.pytorch.accelerators import find_usable_cuda_devices
+from lightning.pytorch.loggers import WandbLogger
+
 from control import LayoutLMModule
 from data import DataModule
 from utils import set_seed
@@ -37,15 +37,17 @@ def main():
     parser.add_argument("--val_size", type=int, default=None)
     parser.add_argument("--test_size", type=int, default=None)
     parser.add_argument("--ood_size", type=int, default=None)
-    parser.add_argument("--reuse_from_disk", action="store_true", help="Reuse data from disk")
+    parser.add_argument("--use_from_disk", action="store_true", help="Reuse data from disk")
     parser.add_argument("--save_parquets", action="store_true", help="Save data to parquet")
-    parser.add_argument("--load_parquets", action="store_true", help="Load data from parquet")
+    parser.add_argument("--use_parquets", action="store_true", help="Load data from parquet")
     parser.add_argument("--process_data_only", action="store_true", help="Exit after processing data")
     parser.add_argument("--save_to_disk", action="store_true", help="Save data to disk")
 
     args = parser.parse_args()
 
-    data = DataModule(args)
+    data = DataModule(
+        args, 
+    )
     print("Processing data")
     data.prepare_data()
     if args.process_data_only:
@@ -63,10 +65,9 @@ def main():
     #wandb_logger.watch(model, log="all")
     # Trainer Flags: precision=16,
     trainer = Trainer(
-        gpus=4,
-        devices=find_usable_cuda_devices(4),
+        devices=find_usable_cuda_devices(1),
         accelerator="gpu",
-        strategy="ddp_spawn",
+        # strategy="ddp_spawn",
         logger=wandb_logger,
         max_epochs=args.num_train_epochs,
         benchmark=True,

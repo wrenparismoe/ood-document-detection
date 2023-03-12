@@ -43,11 +43,10 @@ class DataModule(LightningDataModule):
         else:
             self.test_size = args.test_size
         self.ood_size = args.ood_size
-        #self.use_from_disk = args.use_from_disk
-        self.reuse_from_disk = args.reuse_from_disk
+        self.use_from_disk = args.use_from_disk
         self.save_to_disk = args.save_to_disk
         self.save_parquets = args.save_parquets
-        self.load_parquets = args.load_parquets
+        self.use_parquets = args.use_parquets
         self.max_seq_length = max_seq_length
         self.tokenizer = tokenizer
 
@@ -154,7 +153,7 @@ class DataModule(LightningDataModule):
 
     def prepare_data(self):
         # preliminary steps only called on 1 GPU/TPU in distributed
-        if self.reuse_from_disk or self.use_parquets:
+        if self.use_from_disk or self.use_parquets:
             return
 
         train_df = pd.read_csv("/tmp/wpm/data/processed_train.csv")
@@ -221,20 +220,20 @@ class DataModule(LightningDataModule):
         # Tokenize,
         # Save processed datasets to disk (also parquet files)
         if self.save_to_disk:
-            train_dataset_temp.save_to_disk("/tmp/wpm/data/train_dataset")
-            dev_dataset_temp.save_to_disk("/tmp/wpm/data/dev_dataset")
-            test_dataset_temp.save_to_disk("/tmp/wpm/data/test_dataset")
-            ood_dataset_temp.save_to_disk("/tmp/wpm/data/ood_dataset")
+            self.train_dataset_temp.save_to_disk("/tmp/wpm/data/train_dataset")
+            self.dev_dataset_temp.save_to_disk("/tmp/wpm/data/dev_dataset")
+            self.test_dataset_temp.save_to_disk("/tmp/wpm/data/test_dataset")
+            self.ood_dataset_temp.save_to_disk("/tmp/wpm/data/ood_dataset")
         elif self.save_parquets:
-            train_dataset_temp.to_parquet("/tmp/wpm/data/train_dataset.parquet")
-            dev_dataset_temp.to_parquet("/tmp/wpm/data/dev_dataset.parquet")
-            test_dataset_temp.to_parquet("/tmp/wpm/data/test_dataset.parquet")
-            ood_dataset_temp.to_parquet("/tmp/wpm/data/ood_dataset.parquet")
+            self.train_dataset_temp.to_parquet("/tmp/wpm/data/train_dataset.parquet")
+            self.dev_dataset_temp.to_parquet("/tmp/wpm/data/dev_dataset.parquet")
+            self.test_dataset_temp.to_parquet("/tmp/wpm/data/test_dataset.parquet")
+            self.ood_dataset_temp.to_parquet("/tmp/wpm/data/ood_dataset.parquet")
 
     def setup(self, stage=None):
         # make assignments here (val/train/test split) - called on every process in DDP
         # Load tokenized datasets from disk here
-        if self.reuse_from_disk:
+        if self.use_from_disk:
             train_dataset = load_from_disk("/tmp/wpm/data/train_dataset")
             if self.train_size > train_dataset.shape[0]:
                 raise ValueError("Train size is larger than the dataset size on disk")
@@ -251,7 +250,7 @@ class DataModule(LightningDataModule):
             if self.ood_size > ood_dataset.shape[0]:
                 raise ValueError("OOD size is larger than the dataset size on disk")
             self.ood_dataset = ood_dataset[0:self.ood_size]
-        elif self.load_parquets:
+        elif self.use_parquets:
             self.train_dataset = Dataset.from_dict(
                 load_dataset("tmp/wpm/data/train_dataset.parquet")
             )
