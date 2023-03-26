@@ -50,6 +50,11 @@ class DataModule(LightningDataModule):
         self.max_seq_length = max_seq_length
         self.tokenizer = tokenizer
 
+        if args.local is True:
+            self.data_dir = "data"
+        else:
+            self.data_dir = "/tmp/wpm/data"
+
         self.features = Features(
             {
                 "input_ids": Sequence(feature=Value(dtype="int64")),
@@ -155,11 +160,11 @@ class DataModule(LightningDataModule):
         # preliminary steps only called on 1 GPU/TPU in distributed
         if self.use_from_disk or self.use_parquets:
             return
-
-        train_df = pd.read_csv("/tmp/wpm/data/processed_train.csv")
-        val_df = pd.read_csv("/tmp/wpm/data/processed_val.csv")
-        test_df = pd.read_csv("/tmp/wpm/data/processed_test.csv")
-        ood_df = pd.read_csv("/tmp/wpm/data/processed_ood.csv")
+        
+        train_df = pd.read_csv(f"{self.data_dir}/processed_train.csv")
+        val_df = pd.read_csv(f"{self.data_dir}/processed_val.csv")
+        test_df = pd.read_csv(f"{self.data_dir}/processed_test.csv")
+        ood_df = pd.read_csv(f"{self.data_dir}/processed_ood.csv")
 
         updated_train = Dataset.from_pandas(train_df[: self.train_size]).map(
             self.parse_json, keep_in_memory=True, num_proc=16
@@ -173,7 +178,10 @@ class DataModule(LightningDataModule):
         updated_ood = Dataset.from_pandas(ood_df[: self.ood_size]).map(
             self.parse_json, keep_in_memory=True, num_proc=4
         )
-
+        
+        #TODO: keep_in_memory=True cuases issues in distributed setting since memory 
+        #      spaces are not shared across CPUs. Try using load_from_cache_file=True
+        #      instead to enable loading of the map function from cache.
         self.train_dataset_temp = updated_train.map(
             lambda example: self.encode_example(example),
             features=self.features,
@@ -220,56 +228,56 @@ class DataModule(LightningDataModule):
         # Tokenize,
         # Save processed datasets to disk (also parquet files)
         if self.save_to_disk:
-            self.train_dataset_temp.save_to_disk("/tmp/wpm/data/train_dataset")
-            self.dev_dataset_temp.save_to_disk("/tmp/wpm/data/dev_dataset")
-            self.test_dataset_temp.save_to_disk("/tmp/wpm/data/test_dataset")
-            self.ood_dataset_temp.save_to_disk("/tmp/wpm/data/ood_dataset")
+            self.train_dataset_temp.save_to_disk(f"{self.data_dir}/train_dataset")
+            self.dev_dataset_temp.save_to_disk(f"{self.data_dir}/dev_dataset")
+            self.test_dataset_temp.save_to_disk(f"{self.data_dir}/test_dataset")
+            self.ood_dataset_temp.save_to_disk(f"{self.data_dir}/ood_dataset")
         if self.save_parquets:
-            self.train_dataset_temp.to_parquet("/tmp/wpm/data/train_dataset.parquet")
-            self.dev_dataset_temp.to_parquet("/tmp/wpm/data/dev_dataset.parquet")
-            self.test_dataset_temp.to_parquet("/tmp/wpm/data/test_dataset.parquet")
-            self.ood_dataset_temp.to_parquet("/tmp/wpm/data/ood_dataset.parquet")
+            self.train_dataset_temp.to_parquet(f"{self.data_dir}/train_dataset.parquet")
+            self.dev_dataset_temp.to_parquet(f"{self.data_dir}/dev_dataset.parquet")
+            self.test_dataset_temp.to_parquet(f"{self.data_dir}/test_dataset.parquet")
+            self.ood_dataset_temp.to_parquet(f"{self.data_dir}/ood_dataset.parquet")
 
     def setup(self, stage=None):
         # make assignments here (val/train/test split) - called on every process in DDP
         # Load tokenized datasets from disk here
         if self.use_from_disk:
-            train_dataset = load_from_disk("/tmp/wpm/data/train_dataset")
+            train_dataset = load_from_disk(f"{self.data_dir}/train_dataset")
             if self.train_size > train_dataset.shape[0]:
                 raise ValueError("Train size is larger than the dataset size on disk")
             self.train_dataset = train_dataset[0:self.train_size]
-            dev_dataset = load_from_disk("/tmp/wpm/data/dev_dataset")
+            dev_dataset = load_from_disk(f"{self.data_dir}/dev_dataset")
             if self.val_size > dev_dataset.shape[0]:
                 raise ValueError("Val size is larger than the dataset size on disk")
             self.dev_dataset = dev_dataset[0:self.val_size]
-            test_dataset = load_from_disk("/tmp/wpm/data/test_dataset")
+            test_dataset = load_from_disk(f"{self.data_dir}/test_dataset")
             if self.test_size > test_dataset.shape[0]:
                 raise ValueError("Test size is larger than the dataset size on disk")
             self.test_dataset = test_dataset[0:self.test_size]
-            ood_dataset = load_from_disk("/tmp/wpm/data/ood_dataset")
+            ood_dataset = load_from_disk(f"{self.data_dir}/ood_dataset")
             if self.ood_size > ood_dataset.shape[0]:
                 raise ValueError("OOD size is larger than the dataset size on disk")
             self.ood_dataset = ood_dataset[0:self.ood_size]
         elif self.use_parquets:
             self.train_dataset = Dataset.from_dict(
-                load_dataset("tmp/wpm/data/train_dataset.parquet")
+                load_dataset(f"{self.data_dir}/train_dataset.parquet")
             )
-            self.train_dataset = train_dataset[0:self.train_size]
+            self.train_dataset = self.train_dataset[0:self.train_size]
 
             self.dev_dataset = Dataset.from_dict(
-                load_dataset("tmp/wpm/data/dev_dataset.parquet")
+                load_dataset(f"{self.data_dir}/dev_dataset.parquet")
             )
-            self.dev_dataset = dev_dataset[0:self.dev_size]
+            self.dev_dataset = self.dev_dataset[0:self.val_size]
 
             self.test_dataset = Dataset.from_dict(
-                load_dataset("tmp/wpm/data/test_dataset.parquet")
+                load_dataset(f"{self.data_dir}/test_dataset.parquet")
             )
-            self.dev_dataset = dev_dataset[0:self.dev_size]
+            self.test_dataset = self.test_dataset[0:self.test_size]
 
             self.ood_dataset = Dataset.from_dict(
-                load_dataset("tmp/wpm/data/ood_dataset.parquet")
+                load_dataset(f"{self.data_dir}/ood_dataset.parquet")
             )
-            self.ood_dataset = ood_dataset[0:self.ood_size]
+            self.ood_dataset = self.ood_dataset[0:self.ood_size]
         else:
             self.train_dataset = self.train_dataset_temp
             self.dev_dataset = self.dev_dataset_temp

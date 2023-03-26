@@ -1,6 +1,7 @@
 import argparse
 import os
 import warnings
+import socket
 
 from lightning.pytorch import Trainer
 from lightning.pytorch.accelerators import find_usable_cuda_devices
@@ -42,8 +43,19 @@ def main():
     parser.add_argument("--use_parquets", action="store_true", help="Load data from parquet")
     parser.add_argument("--process_data_only", action="store_true", help="Exit after processing data")
     parser.add_argument("--save_to_disk", action="store_true", help="Save data to disk")
-
     args = parser.parse_args()
+
+    hostname = socket.gethostname()
+    hostslice = hostname.split("-")[0]
+    if hostslice == "wpm":
+        args.local = True
+    elif hostslice == "klone":
+        os.chdir("/tmp/wpm")
+        args.local = False
+    else:
+        args.local = None
+
+
 
     data = DataModule(
         args, 
@@ -70,7 +82,7 @@ def main():
         # strategy="ddp_spawn",
         logger=wandb_logger,
         max_epochs=args.num_train_epochs,
-        benchmark=True,
+        #benchmark=True,
         precision=16
     )
     print("Running trainer.fit()")
@@ -83,10 +95,9 @@ def main():
 
 
 if __name__ == "__main__":
-    # Set the enviornment varaible DATA_DIR to the directory where the data is stored
-    os.chdir("/tmp/wpm")
+       # Set the enviornment varaible DATA_DIR to the directory where the data is stored
+    #os.chdir("/tmp/wpm")
 
-    # os.environ['PYTORCH_CUDA_ALLOC_CONF'] = \
-    #   "max_split_size_mb:512,garbage_collection_threshold:0.82"
+    os.environ['PYTORCH_CUDA_ALLOC_CONF'] = "max_split_size_mb:512,garbage_collection_threshold:0.80"
 
     main()

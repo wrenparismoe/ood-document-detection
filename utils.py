@@ -19,8 +19,8 @@ def set_seed(args):
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed_all(args.seed)
-    backends.cudnn.benchmark = True
-    backends.cuda.matmul.allow_tf32 = True
-    backends.cudnn.allow_tf32 = True
+    #backends.cudnn.benchmark = True
+    #backends.cuda.matmul.allow_tf32 = True
+    #backends.cudnn.allow_tf32 = True
     backends.cuda.matmul.allow_fp16_reduced_precision_reduction = True
     torch.set_float32_matmul_precision("medium")

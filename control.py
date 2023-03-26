@@ -196,7 +196,7 @@ class LayoutLMModule(pl.LightningModule):  # LightningModule
     # def test_step_end(self, test_step_outputs):
     #     return test_step_outputs
 
-    def test_epoch_end(self):
+    def on_test_epoch_end(self):
         # self.bank = torch.cat([batch_output[0] for batch_output in test_outputs])
         # self.label_bank = torch.cat([batch_output[1] for batch_output in test_outputs])
 
